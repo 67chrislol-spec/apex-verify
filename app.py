@@ -6,7 +6,8 @@ import secrets
 app = Flask(**name**)
 app.secret_key = secrets.token_hex(32)
 
-CLIENT_ID = “1496753618861424700”
+CLIENT_ID = "1496753618861424700"
+
 CLIENT_SECRET = os.environ.get(“CLIENT_SECRET”)
 BOT_TOKEN = os.environ.get(“BOT_TOKEN”)
 GUILD_ID = “1488422873415811092”
