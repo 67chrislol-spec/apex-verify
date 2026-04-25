@@ -1,202 +1,123 @@
 import os
-import discord
-from discord.ext import commands
+import requests
+from flask import Flask, request, render_template_string
 
-intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
+app = Flask(__name__)
 
-bot = commands.Bot(command_prefix=”!”, intents=intents)
+CLIENT_ID = "1496753618861424700"
+CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+GUILD_ID = "1488422873415811092"
+ROLE_NAME = "apex | member"
+REDIRECT_URI = os.environ.get("REDIRECT_URI")
 
-VERIFY_URL = “https://discord.com/oauth2/authorize?client_id=1496753618861424700&response_type=code&redirect_uri=https%3A%2F%2Fapex-verify-d.up.railway.app%2Fcallback&scope=identify+guilds.join”
+DISCORD_API = "https://discord.com/api/v10"
 
-def build_verify_embed(guild):
-embed = discord.Embed(
-title=“Server Verification”,
-description=“Click the button below to verify and gain access to the server.”,
-color=discord.Color.green(),
-)
-if guild.icon:
-embed.set_thumbnail(url=guild.icon.url)
-return embed
+HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>APEX Verification</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--orange:#ff5a1e;--bg:#0a0a0b;--surface:#111113;--border:rgba(255,255,255,0.07);--text:#f0ede8;--muted:#888}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:52px 48px 44px;width:min(480px,calc(100vw - 32px));text-align:center}
+.icon{width:72px;height:72px;border-radius:50%;background:rgba(255,90,30,0.15);border:1.5px solid rgba(255,90,30,0.4);display:flex;align-items:center;justify-content:center;margin:0 auto 28px;font-size:32px}
+h1{font-family:'Bebas Neue',sans-serif;font-size:2.8rem;letter-spacing:0.08em;margin-bottom:12px}
+.subtitle{color:var(--muted);font-size:0.95rem;margin-bottom:32px}
+.success{background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.3);color:#4ade80;border-radius:12px;padding:14px 18px;margin-bottom:24px}
+.error{background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:12px;padding:14px 18px;margin-bottom:24px}
+.footer{margin-top:24px;color:var(--muted);font-size:0.78rem}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">{{ icon }}</div>
+  <h1>{{ title }}</h1>
+  <p class="subtitle">{{ subtitle }}</p>
+  {% if status == "success" %}<div class="success">{{ message }}</div>{% endif %}
+  {% if status == "error" %}<div class="error">{{ message }}</div>{% endif %}
+  <p class="footer">APEX Verification System</p>
+</div>
+</body>
+</html>"""
 
-def build_verify_view():
-view = discord.ui.View(timeout=None)
-view.add_item(
-discord.ui.Button(
-label=“Verify”,
-url=VERIFY_URL,
-style=discord.ButtonStyle.link,
-)
-)
-return view
 
-async def ensure_verify_embed(guild):
-verify_channel = discord.utils.find(
-lambda c: “verify” in c.name.lower(), guild.text_channels
-)
-if verify_channel is None:
-return
+def render(icon, title, subtitle, status=None, message=None):
+    return render_template_string(HTML, icon=icon, title=title, subtitle=subtitle, status=status, message=message)
 
-```
-try:
-    async for msg in verify_channel.history(limit=50):
-        if (
-            msg.author == bot.user
-            and msg.embeds
-            and msg.embeds[0].title == "Server Verification"
-        ):
-            return
-except discord.Forbidden:
-    return
 
-try:
-    await verify_channel.send(embed=build_verify_embed(guild), view=build_verify_view())
-    print("[ensure_verify_embed] posted in #" + verify_channel.name)
-except discord.Forbidden:
-    print("[ensure_verify_embed] FORBIDDEN in #" + verify_channel.name)
-```
+@app.route("/")
+def index():
+    return render("lightning", "APEX Verify", "Use the link from your Discord server to verify.")
 
-@bot.event
-async def on_ready():
-print(“Logged in as “ + str(bot.user))
-for guild in bot.guilds:
-await ensure_verify_embed(guild)
-try:
-synced = await bot.tree.sync()
-print(”[on_ready] synced “ + str(len(synced)) + “ slash commands”)
-except Exception as e:
-print(”[on_ready] failed to sync: “ + str(e))
 
-@bot.event
-async def on_raw_message_delete(payload):
-if payload.guild_id is None:
-return
-guild = bot.get_guild(payload.guild_id)
-if guild is None:
-return
-channel = guild.get_channel(payload.channel_id)
-if channel is None or “verify” not in channel.name.lower():
-return
-cached = payload.cached_message
-if cached is not None:
-if cached.author != bot.user:
-return
-if not cached.embeds or cached.embeds[0].title != “Server Verification”:
-return
-await ensure_verify_embed(guild)
+@app.route("/callback")
+def callback():
+    code = request.args.get("code")
+    error = request.args.get("error")
 
-@bot.event
-async def on_member_join(member):
-print(”[on_member_join] “ + str(member) + “ joined “ + member.guild.name)
+    if error or not code:
+        return render("X", "Access Denied", "You declined the verification.", status="error", message="Verification was cancelled.")
 
-```
-unverified_role = discord.utils.find(
-    lambda r: r.name.strip().lower() == "unverified", member.guild.roles
-)
-if unverified_role:
-    try:
-        await member.add_roles(unverified_role)
-    except discord.Forbidden:
-        print("[on_member_join] FORBIDDEN to add unverified role")
-
-welcome_channel = discord.utils.find(
-    lambda c: "welcome" in c.name.lower(), member.guild.text_channels
-)
-if welcome_channel:
-    count = member.guild.member_count
-    suffix = (
-        "th" if 10 <= count % 100 <= 20
-        else {1: "st", 2: "nd", 3: "rd"}.get(count % 10, "th")
+    token_res = requests.post(
+        DISCORD_API + "/oauth2/token",
+        data={
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": REDIRECT_URI,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
-    embed = discord.Embed(
-        description="Welcome " + member.display_name + " to **APEX** - you are the " + str(count) + suffix + " member!",
-        color=discord.Color.from_rgb(255, 90, 30),
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    try:
-        await welcome_channel.send(
-            content="Welcome " + member.mention + " to **APEX**! You are the " + str(count) + suffix + " member!",
-            embed=embed,
-        )
-    except discord.Forbidden:
-        pass
-```
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setup(ctx):
-try:
-await ctx.message.delete()
-except discord.HTTPException:
-pass
-await ctx.send(embed=build_verify_embed(ctx.guild), view=build_verify_view())
+    if token_res.status_code != 200:
+        return render("X", "Error", "Something went wrong.", status="error", message="Could not exchange code. Try again.")
 
-@setup.error
-async def setup_error(ctx, error):
-if isinstance(error, commands.MissingPermissions):
-try:
-await ctx.message.delete()
-except discord.HTTPException:
-pass
+    access_token = token_res.json().get("access_token")
 
-@bot.tree.command(name=“verify”, description=“Manually verify a member (admin only)”)
-@discord.app_commands.describe(member=“The member to verify”)
-async def verify_cmd(interaction, member: discord.Member):
-if not interaction.user.guild_permissions.administrator:
-await interaction.response.send_message(“Administrator permission required.”, ephemeral=True)
-return
+    user_res = requests.get(DISCORD_API + "/users/@me", headers={"Authorization": "Bearer " + access_token})
+    if user_res.status_code != 200:
+        return render("X", "Error", "Could not fetch your account.", status="error", message="Please try again.")
 
-```
-await interaction.response.defer(ephemeral=True, thinking=True)
-guild = interaction.guild
+    user = user_res.json()
+    user_id = user["id"]
+    username = user.get("global_name") or user.get("username", "Member")
 
-role = discord.utils.find(lambda r: r.name.strip().lower() == "apex | member", guild.roles)
-if role is None:
-    await interaction.followup.send("Role apex | member not found.", ephemeral=True)
-    return
-if role in member.roles:
-    await interaction.followup.send(str(member.mention) + " is already verified.", ephemeral=True)
-    return
+    roles_res = requests.get(DISCORD_API + "/guilds/" + GUILD_ID + "/roles", headers={"Authorization": "Bot " + BOT_TOKEN})
+    role_id = None
+    unverified_id = None
+    for role in roles_res.json():
+        if role["name"].strip().lower() == "apex | member":
+            role_id = role["id"]
+        if role["name"].strip().lower() == "unverified":
+            unverified_id = role["id"]
 
-try:
-    await member.add_roles(role, reason="Manually verified by " + str(interaction.user))
-except discord.Forbidden:
-    await interaction.followup.send("Missing permissions to assign that role.", ephemeral=True)
-    return
+    if not role_id:
+        return render("X", "Error", "Role not found.", status="error", message="Contact an admin.")
 
-unverified_role = discord.utils.find(lambda r: r.name.strip().lower() == "unverified", guild.roles)
-if unverified_role and unverified_role in member.roles:
-    try:
-        await member.remove_roles(unverified_role)
-    except discord.Forbidden:
-        pass
+    member_res = requests.get(DISCORD_API + "/guilds/" + GUILD_ID + "/members/" + user_id, headers={"Authorization": "Bot " + BOT_TOKEN})
 
-await interaction.followup.send("Verified " + str(member.mention) + ".", ephemeral=True)
-```
+    if member_res.status_code != 200:
+        return render("X", "Not in Server", "Join the server first.", status="error", message="Join APEX then try again.")
 
-@bot.tree.command(name=“verifycount”, description=“Show verified vs unverified counts (admin only)”)
-async def verifycount(interaction):
-if not interaction.guild or not interaction.user.guild_permissions.administrator:
-await interaction.response.send_message(“Administrator permission required.”, ephemeral=True)
-return
+    member_data = member_res.json()
 
-```
-guild = interaction.guild
-member_role = discord.utils.find(lambda r: r.name.strip().lower() == "apex | member", guild.roles)
-unverified_role = discord.utils.find(lambda r: r.name.strip().lower() == "unverified", guild.roles)
+    if role_id in member_data.get("roles", []):
+        return render("V", "Already Verified", "You already have access.", status="success", message="You are already verified! Head back to Discord.")
 
-embed = discord.Embed(title="Verification Stats", color=discord.Color.from_rgb(255, 90, 30))
-embed.add_field(name="Verified", value=str(len(member_role.members) if member_role else 0), inline=True)
-embed.add_field(name="Unverified", value=str(len(unverified_role.members) if unverified_role else 0), inline=True)
-embed.add_field(name="Total Members", value=str(guild.member_count), inline=True)
-if guild.icon:
-    embed.set_thumbnail(url=guild.icon.url)
-await interaction.response.send_message(embed=embed, ephemeral=True)
-```
+    requests.put(DISCORD_API + "/guilds/" + GUILD_ID + "/members/" + user_id + "/roles/" + role_id, headers={"Authorization": "Bot " + BOT_TOKEN})
 
-token = os.environ.get(“DISCORD_BOT_TOKEN”)
-if not token:
-raise RuntimeError(“DISCORD_BOT_TOKEN environment variable is not set”)
+    if unverified_id and unverified_id in member_data.get("roles", []):
+        requests.delete(DISCORD_API + "/guilds/" + GUILD_ID + "/members/" + user_id + "/roles/" + unverified_id, headers={"Authorization": "Bot " + BOT_TOKEN})
 
-bot.run(token)
+    return render("V", "Verified!", "Welcome to APEX, " + username + ".", status="success", message="You now have full access. Head back to Discord!")
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
